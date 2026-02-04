@@ -11,3 +11,14 @@ steps:
       - go test
     when:
       - event: push
+
+  build-wasm:
+    image: gitea.elara.ws/elara6331/golang:latest
+    environment:
+      - GOOS=js
+      - GOARCH=wasm
+    commands:
+      - go build ./...
+    when:
+      - event: push
+      - platform: linux/amd64

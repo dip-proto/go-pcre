@@ -1,4 +1,4 @@
-//go:build !js || !wasm
+//go:build js && wasm
 
 // Package pcre is a library that provides pcre2 regular expressions
 // in pure Go, allowing for features such as cross-compiling.
@@ -19,7 +19,7 @@ import (
 
 	"go.elara.ws/pcre/lib"
 
-	"modernc.org/libc"
+	libc "go.elara.ws/pcre/libcwasm"
 )
 
 const Unset = math.MaxUint
@@ -54,33 +54,25 @@ func Compile(pattern string) (*Regexp, error) {
 func CompileOpts(pattern string, options CompileOption) (*Regexp, error) {
 	tls := libc.NewTLS()
 
-	// Get C string of pattern
 	cPattern, err := libc.CString(pattern)
 	if err != nil {
 		return nil, err
 	}
-	// Free the string when done
 	defer libc.Xfree(tls, cPattern)
 
-	// Allocate new error
 	cErr := allocError(tls)
-	// Free error when done
 	defer libc.Xfree(tls, cErr)
 
-	// Get error offsets
 	errPtr := addErrCodeOffset(cErr)
 	errOffsetPtr := addErrOffsetOffset(cErr)
 
-	// Convert pattern length to size_t type
 	cPatLen := lib.Tsize_t(len(pattern))
 
-	// Compile expression
 	r := lib.Xpcre2_compile_8(tls, cPattern, cPatLen, uint32(options), errPtr, errOffsetPtr, 0)
 	if r == 0 {
 		return nil, ptrToError(tls, cErr)
 	}
 
-	// Create regexp instance
 	regex := Regexp{
 		expr:       pattern,
 		mtx:        &sync.Mutex{},
@@ -90,8 +82,6 @@ func CompileOpts(pattern string, options CompileOption) (*Regexp, error) {
 		calloutMtx: &sync.Mutex{},
 	}
 
-	// Make sure resources are freed if GC collects the
-	// regular expression.
 	runtime.SetFinalizer(&regex, func(r *Regexp) error {
 		return r.Close()
 	})
@@ -414,18 +404,14 @@ func (r *Regexp) ReplaceAll(src, repl []byte) []byte {
 				}
 			}
 
-			// If there given match does not exist, return empty string
 			if i == 0 || len(match) < (2*i)+1 {
 				return ""
 			}
 
-			// Return match
 			return string(src[match[2*i]:match[(2*i)+1]])
 		})
-		// Replace replacement string with expanded string
 		repl := []byte(replStr)
 
-		// Replace bytes with new replacement string
 		diff, out = replaceBytes(out, repl, match[0], match[1], diff)
 	}
 
@@ -557,24 +543,19 @@ func (r *Regexp) SubexpIndex(name string) int {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	// Get C string of name
 	cName, err := libc.CString(name)
 	if err != nil {
 		panic(err)
 	}
 
-	// Get substring index from name
 	ret := lib.Xpcre2_substring_number_from_name_8(r.tls, r.re, cName)
 
-	// If no substring error returned, return -1.
-	// If a different error is returned, panic.
 	if ret == lib.DPCRE2_ERROR_NOSUBSTRING {
 		return -1
 	} else if ret < 0 {
 		panic(codeToError(r.tls, ret))
 	}
 
-	// Return the index of the subexpression
 	return int(ret)
 }
 
@@ -623,7 +604,6 @@ func (r *Regexp) SetCallout(fn func(cb *CalloutBlock) int32) error {
 	r.calloutMtx.Lock()
 	defer r.calloutMtx.Unlock()
 
-	// Prevent callout function from being GC'd
 	r.callout = &cfn
 
 	ret := lib.Xpcre2_set_callout_8(r.tls, r.mctx, *(*uintptr)(unsafe.Pointer(&cfn)), 0)
@@ -658,51 +638,34 @@ func (r *Regexp) match(b []byte, options uint32, multi bool) ([][]lib.Tsize_t, e
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	// Create a C pointer to the subject
 	sp := unsafe.Pointer(&b[0])
 	cSubject := uintptr(sp)
-	// Convert the size of the subject to a C size_t type
 	cSubjectLen := lib.Tsize_t(len(b))
 
-	// Create match data using the pattern to figure out the buffer size
 	md := lib.Xpcre2_match_data_create_from_pattern_8(r.tls, r.re, 0)
 	if md == 0 {
 		panic("error creating match data")
 	}
-	// Free the match data at the end of the function
 	defer lib.Xpcre2_match_data_free_8(r.tls, md)
 
 	var offset lib.Tsize_t
 	var out [][]lib.Tsize_t
-	// While the offset is less than the length of the subject
 	for offset < cSubjectLen {
-		// Execute expression on subject
 		ret := lib.Xpcre2_match_8(r.tls, r.re, cSubject, cSubjectLen, offset, options, md, r.mctx)
 		if ret < 0 {
-			// If no match found, break
 			if ret == lib.DPCRE2_ERROR_NOMATCH {
 				break
 			}
 
 			return nil, codeToError(r.tls, ret)
 		} else {
-			// Get amount of pairs in output vector
 			pairAmt := lib.Xpcre2_get_ovector_count_8(r.tls, md)
-			// Get pointer to output vector
 			ovec := lib.Xpcre2_get_ovector_pointer_8(r.tls, md)
-			// Create a Go slice using the output vector as the underlying array
 			slice := unsafe.Slice((*lib.Tsize_t)(unsafe.Pointer(ovec)), pairAmt*2)
 
-			// Create a new slice and copy the elements from the slice
-			// This is required because the match data will be freed in
-			// a defer, and that would cause a panic every time the slice
-			// is used later.
 			matches := make([]lib.Tsize_t, len(slice))
 			copy(matches, slice)
 
-			// If the two indices are the same (empty string), and the match is not
-			// immediately after another match, add it to the output and increment the
-			// offset. Otherwise, increment the offset and ignore the match.
 			if slice[0] == slice[1] && len(out) > 0 && slice[0] != out[len(out)-1][1] {
 				out = append(out, matches)
 				offset = slice[1] + 1
@@ -712,13 +675,10 @@ func (r *Regexp) match(b []byte, options uint32, multi bool) ([][]lib.Tsize_t, e
 				continue
 			}
 
-			// Add the match to the output
 			out = append(out, matches)
-			// Set the next offset to the end index of the match
 			offset = matches[1]
 		}
 
-		// If multiple matches disabled, break
 		if !multi {
 			break
 		}
@@ -726,12 +686,8 @@ func (r *Regexp) match(b []byte, options uint32, multi bool) ([][]lib.Tsize_t, e
 	return out, nil
 }
 
-// patternInfo calls the underlying pcre pattern info function
-// and returns information about the compiled regular expression
 func (r *Regexp) patternInfo(what uint32) (out uint32) {
-	// Create a C pointer to the output integer
 	cOut := uintptr(unsafe.Pointer(&out))
-	// Get information about the compiled pattern
 	lib.Xpcre2_pattern_info_8(r.tls, r.re, what, cOut)
 	return
 }
@@ -742,14 +698,10 @@ func (r *Regexp) Close() error {
 		return nil
 	}
 
-	// Close thread-local storage
 	defer r.tls.Close()
 
-	// Free the compiled code
 	lib.Xpcre2_code_free_8(r.tls, r.re)
-	// Free the match context
 	lib.Xpcre2_match_context_free_8(r.tls, r.mctx)
-	// Set regular expression to null
 	r.re = 0
 
 	return nil

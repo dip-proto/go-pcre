@@ -1,4 +1,4 @@
-//go:build !js || !wasm
+//go:build js && wasm
 
 package pcre
 
@@ -8,8 +8,8 @@ import (
 
 	"go.elara.ws/pcre/lib"
 
-	"modernc.org/libc"
-	"modernc.org/libc/sys/types"
+	libc "go.elara.ws/pcre/libcwasm"
+	"go.elara.ws/pcre/libcwasm/sys/types"
 )
 
 var pce pcreError
@@ -61,8 +61,6 @@ func codeToError(tls *libc.TLS, code int32) *PcreError {
 	errBuf := make([]byte, 256)
 	cErrBuf := uintptr(unsafe.Pointer(&errBuf[0]))
 
-	// Get the textual error message associated with the code,
-	// and store it in errBuf.
 	msgLen := lib.Xpcre2_get_error_message_8(tls, code, cErrBuf, 256)
 
 	return &PcreError{false, 0, string(errBuf[:msgLen])}

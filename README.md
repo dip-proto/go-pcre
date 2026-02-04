@@ -22,6 +22,7 @@ Due to the use of PCRE2, this library contains extra features such as lookaheads
 - linux/riscv64
 - darwin/amd64
 - darwin/arm64
+- js/wasm (note: `Glob()` is not supported, use `CompileGlob()` instead)
 
 More OS support is planned.
 
