@@ -1,4 +1,4 @@
-//go:build !js || !wasm
+//go:build !wasm
 
 // Package pcre is a library that provides pcre2 regular expressions
 // in pure Go, allowing for features such as cross-compiling.
