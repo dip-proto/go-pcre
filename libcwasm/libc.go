@@ -1,4 +1,4 @@
-//go:build js && wasm
+//go:build wasm
 
 // Package libcwasm provides a minimal libc implementation for WebAssembly.
 // It implements only the functions needed by the PCRE2 transpiled code.

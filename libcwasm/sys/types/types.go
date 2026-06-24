@@ -1,4 +1,4 @@
-//go:build js && wasm
+//go:build wasm
 
 // Package types provides type definitions for the libcwasm package.
 package types
